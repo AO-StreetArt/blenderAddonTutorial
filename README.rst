@@ -3,6 +3,15 @@ Testable Blender Addons
 
 This repository contains the source code for the tutorial 'Testable Blender Addons'
 
+Running Unit Tests
+------------------
+
+Unit tests can be run with the below command, from the 'addon_logic' folder:
+
+.. code-block:: bash
+
+   python3 -m test.move_object_test
+
 Bundling the Addon
 ------------------
 

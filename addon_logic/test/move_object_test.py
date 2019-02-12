@@ -31,6 +31,7 @@ class TestStringMethods(unittest.TestCase):
         assert(active_object.get_location_x() - 2.0 < 0.01)
         assert(active_object.get_location_y() - 3.0 < 0.01)
         assert(active_object.get_location_z() - 4.0 < 0.01)
+        object_api_wrapper.get_active_object.assert_called()
 
 if __name__ == '__main__':
     unittest.main()
