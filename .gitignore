@@ -1,0 +1,4 @@
+__pycache__/
+*/__pycache__/
+addon_logic/.pytest_cache/
+*.pyc
