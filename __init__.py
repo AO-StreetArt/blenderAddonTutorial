@@ -48,7 +48,7 @@ import bpy
 # Registration for each class individually,
 # per change notes for Blender2.8 release
 # https://wiki.blender.org/wiki/Reference/Release_Notes/2.80/Python_API/Addons
-classes = [move_object_operator.OBJECT_OT_MoveObject, test_operators.OBJECT_OT_ExecuteBlenderSyncTests]
+classes = [move_object_operator.OBJECT_OT_MoveObject, test_operators.OBJECT_OT_MoveObjectTests]
 
 def register():
     # Register modules
