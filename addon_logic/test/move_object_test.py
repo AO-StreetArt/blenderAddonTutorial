@@ -14,15 +14,12 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
-import os
-import pytest
-import queue
 import unittest
 
 from move_object import move_active_object
 from api_wrapper_mock.object_api_mock import ObjectApiMock, Object3dMock
 
-class TestStringMethods(unittest.TestCase):
+class TestMoveActiveObject(unittest.TestCase):
     def test_move_object(self):
         object_api_wrapper = ObjectApiMock()
         active_object = Object3dMock([1.0, 2.0, 3.0])

@@ -22,7 +22,6 @@ import bpy
 
 from ..addon_logic.move_object import move_active_object
 
-# Save the active object to Aesel
 class OBJECT_OT_MoveObject(bpy.types.Operator):
     bl_idname = "object.another_move_object"
     bl_label = "Move Active Object"

@@ -39,6 +39,7 @@ if "bpy" in locals():
     import importlib
     importlib.reload(object_api_wrapper)
     importlib.reload(move_object_operator)
+    importlib.reload(test_operators)
 else:
     from .api_wrapper import object_api_wrapper
     from .operators import move_object_operator, test_operators

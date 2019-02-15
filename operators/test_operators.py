@@ -43,7 +43,6 @@ def test_move_operator(context):
     for o in bpy.context.scene.objects:
         assert(o.location.x - 1.0 < 0.01)
 
-# Save the active object to Aesel
 class OBJECT_OT_MoveObjectTests(bpy.types.Operator):
     bl_idname = "object.another_move_object_test"
     bl_label = "Test the Move Object Addon!"
@@ -64,6 +63,6 @@ class OBJECT_OT_MoveObjectTests(bpy.types.Operator):
 
         # Display a message in the UI letting the user know that tests have passed
         self.report({'INFO'}, "Tests Passed")
-        
+
         # Let's blender know the operator is finished
         return {'FINISHED'}
