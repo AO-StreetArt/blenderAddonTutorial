@@ -1,0 +1,659 @@
+Opening
+=======
+
+Over the last few years, I've developed several addons for Blender, the open
+source 3D suite, the latest being BlenderSync <--Link Here-->.  Every time, I've been
+frustrated by my inability to effectively test these addons.  Most of the code
+is placed into Operators, which are then called from the UI.  Best case scenario,
+I could call these operators from another test operator.  Worst case scenario,
+my only option was to open up the UI and try them by hand.
+
+This was both extremely slow, and made it very difficult to cover various corner
+cases with the tests.  If you found a way to break your code, regression testing
+basically meant saving a .blend file with the setup that broke it originally, and
+then re-opening that file every time to test.  Find a few of these and you'll
+quickly be spending more time testing your addon than adding features to it.
+
+I decided that there had to be a better way.  I was convinced that the problem
+was not bpy: it was how I was writing my code.  After some thought, I realized
+that we can apply some common design patterns to break our code apart in such a
+way that each piece can be independently tested.
+
+Over the course of this article I will walk you through setting up a testable
+Blender 2.80 addon, using this architecture.  We'll start with an empty folder and
+end with an addon that has a full test suite and CI enabled, which we can import
+into Blender and use.  The add-on we will be working on is quite simple, but
+all the same principles apply when more complex logic is required.
+
+Architecture Overview
+=====================
+
+Our addon is going to have 3 distinct layers: the API Wrapper, the Addon Logic,
+and the Addon Operators.
+
+API Wrapper
+-----------
+
+The API Wrapper layer is a thin wrapper on top of bpy.  This only exposes the functionality
+we need within the logic for our addon, and gets called by the Addon Logic.
+
+Addon Logic
+-----------
+
+The Addon Logic makes calls to the API Wrapper to perform whatever logic is
+required for your addon.  The vast majority of your code should live here.
+
+Operators
+---------
+
+The Operators are callable from the Blender UI, and are used to orchestrate
+the functions from the Addon Logic layer.  Very little actual logic lives here,
+rather the operators are used to define the workflows utilized by the end user.
+
+Testing
+-------
+
+To go with the three layers in the application, we will also have three layers of
+tests:
+
+* API Tests - Validations for the API Wrapper layer, used to identify bad assumptions or breaking across blender versions.
+* Logic Tests - Validations for the Addon Logic layer, used to identify logical flaws in the application.
+* Integration Tests - Full Flow tests using Addon Logic and API Wrapper from a test operator.
+
+Of these three layers, only the Logic Tests will be able to be put onto
+CI (Continuous Integration), so we want to keep as much of our code in there as
+possible.  The other two layers will be run as a separate test operator from
+within Blender.
+
+Getting Started
+===============
+
+Now that we have some idea of what it is we're going to be doing, we can start
+writing some actual code.  Let's begin by creating the following folder structure:
+
+<--image here-->
+
+Operator Design
+---------------
+
+Now, we need to create operators for the actions we want users to perform.  In
+our case, we want users to be able to move the active object.  So, we create the
+'move_object_operator.py' file under the operators/ folder, and make a class
+that inherits from the Operator class.
+
+<--Code-->
+import bpy
+
+class OBJECT_OT_MoveObject(bpy.types.Operator):
+    bl_idname = "object.another_move_object"
+    bl_label = "Move Active Object"
+    bl_options = {'REGISTER'}
+
+    # Properties (inputs) for the operator
+    x: bpy.props.FloatProperty(name="X", default=0.0)
+    y: bpy.props.FloatProperty(name="Y", default=0.0)
+    z: bpy.props.FloatProperty(name="Z", default=0.0)
+
+    def execute(self, context):
+        return {'FINISHED'}
+
+    # Tell Blender to show the properties dialogue when executed
+    def invoke(self, context, event):
+        wm = context.window_manager
+        return wm.invoke_props_dialog(self)
+<--/Code-->
+
+This is a pretty basic operator, with 3 properties.  When a user executes the
+add-on, a popup will display input boxes for the x, y, and z properties.  Right
+now the operator doesn't actually do anything: just displays the properties popup
+and then exits.  We'll change this in a bit, but for now just leave the execute()
+method as it is.
+
+We're going to want one more operator: a test operator.  Right now, this will
+also not actually do anything, but let's go ahead and create a second file,
+'test_operators.py' inside the operators/ folder, with the below contents:
+
+<--Code-->
+import bpy
+
+class OBJECT_OT_MoveObjectTests(bpy.types.Operator):
+    bl_idname = "object.another_move_object_test"
+    bl_label = "Test the Move Object Addon!"
+    bl_options = {'REGISTER'}
+
+    def execute(self, context):
+        # Display a message in the UI letting the user know that tests have passed
+        self.report({'INFO'}, "Tests Passed")
+
+        return {'FINISHED'}
+<--/Code-->
+
+This is another very basic operator, this time without properties.  It is going
+to simply display an alert in the UI saying 'Tests Passed!'.  As we add functionality,
+we will add new tests into this operator.
+
+The Init File
+-------------
+
+Multi-file Blender operators are driven by the root __init__.py file.  This file
+needs to contain the logic for loading and re-loading the other files in the project,
+and the logic to register classes defined in other files.  This, unfortunately,
+does have some downsides, but is really the best choice for larger projects.
+Also, our layered architecture does not work without having separate files
+for the different layers of your project.
+
+Let's create that file now.  In the root folder of your project, create a file
+named '__init__.py', and we'll start in it by defining our addon metadata:
+
+<--Code-->
+bl_info = {
+    "name": "moveObjectAddon",
+    "description": "Demo Blender Add-on to show Layered Architecture",
+    "author": "Alex Barry",
+    "version": (0, 0, 3),
+    "blender": (2, 80, 0),
+    "location": "View3D",
+    "warning": "This addon is still in development.",
+    "wiki_url": "",
+    "category": "Object" }
+<--/Code-->
+
+You should always include this metadata with your addons, and it should always
+be located in your root __init__.py file.  Note the "blender" key, which denotes
+the version of Blender the addon is developed for.  Using an incorrect version
+will generate a warning on installation in the Blender UI.
+
+Next, we need to import submodules.  This includes third-party modules, like
+traceback and bpy, as well as our own modules, such as the operators module.
+
+<--Code-->
+import traceback
+
+if "bpy" in locals():
+    import importlib
+    importlib.reload(test_operators)
+    importlib.reload(move_object_operator)
+else:
+    from .operators import move_object_operator, test_operators
+
+import bpy
+<--/Code-->
+
+This bit of code probably looks quite strange.  First we import traceback, for future
+use, then look at 'if "bpy" in locals()'.  This determines if the module "bpy"
+has already been loaded.  If it has not, then the user has enabled the addon for
+the first time, and we can just import our submodules as normal.  Otherwise, we
+have an addon which has been disabled, then re-enabled in the Blender Preferences UI.
+In this case, we need to explicitly reload the modules to get Blender to read in
+any changes and update it's internal state.
+
+Finally, we need to handle registration and unregistration of Classes with Blender.
+This binds your various operators to the Blender Application and allows users to
+call them.
+
+<--Code-->
+classes = [move_object_operator.OBJECT_OT_MoveObject, test_operators.OBJECT_OT_MoveObjectTests]
+
+def register():
+    try:
+        for cls in classes:
+            bpy.utils.register_class(cls)
+    except:
+        traceback.print_exc()
+    print("Registered {}".format(bl_info["name"]))
+
+def unregister():
+    try:
+        for cls in reversed(classes):
+            bpy.utils.unregister_class(cls)
+    except:
+        traceback.print_exc()
+    print("Unregistered {}".format(bl_info["name"]))
+<--/Code-->
+
+We have to explicitly register every operator class that we want to have in our
+addon.  That means that, in the future, when you add new operators to your addon,
+you'll need to add code in two places:
+
+* In the import statements, to load/reload the module and file
+* In the above code, by adding the class to the 'classes' list
+
+Addon Logic & the API Layer
+===========================
+
+Now we've got the skeleton of our addon built, we can fill out the meat.  Let's
+begin by creating a 'move_object.py' file in the addon_logic/ folder, which will
+contain all of the logic for the move_object_operator.  Let's make a function which
+takes in the same arguments as the properties for the operator we defined:
+
+<--Code-->
+def move_active_object(x, y, z):
+    pass
+<--/Code-->
+
+API Wrapper
+-----------
+
+The first step of the logic we need to write is to get the active object, which
+requires a call to bpy.  We aren't allowed to make any calls to bpy in the addon_layer
+module, so we need to create our API Wrapper to expose the call for get_active_object.
+In the api_wrapper folder, create a file called 'object_api_wrapper.py', containing
+this definition:
+
+<--Code-->
+import bpy
+
+class Object3dWrapper(object):
+    def __init__(self, blender_object):
+        self.blender_obj_ref = blender_object
+
+    def get_location_x(self):
+        return self.blender_obj_ref.location.x
+
+    def set_location_x(self, new_loc):
+        self.blender_obj_ref.location.x = new_loc
+
+    def get_location_y(self):
+        return self.blender_obj_ref.location.y
+
+    def set_location_y(self, new_loc):
+        self.blender_obj_ref.location.y = new_loc
+
+    def get_location_z(self):
+        return self.blender_obj_ref.location.z
+
+    def set_location_z(self, new_loc):
+        self.blender_obj_ref.location.z = new_loc
+
+class ObjectApiWrapper(object):
+    def get_active_object(self):
+        for o in bpy.context.scene.objects:
+            if o.select_get():
+                return Object3dWrapper(o)
+<--/Code-->
+
+First, we define a class that wraps a Blender Object.  Then, we provide the API
+Wrapper object itself which returns the Object Wrapper.  This gives us an interface
+which we can program to, and we'll later rely on that contract to enable automated
+testing.
+
+Addon Logic
+-----------
+
+With our API Wrapper in place, we can go ahead and finish our method in the
+addon_logic/move_object.py file:
+
+<--Code-->
+def move_active_object(object_api_wrapper, x, y, z):
+    active_obj = object_api_wrapper.get_active_object()
+    active_obj.set_location_x(x)
+    active_obj.set_location_y(y)
+    active_obj.set_location_z(z)
+<--/Code-->
+
+Notice what we're doing here.  Because the object_api_wrapper is passed as an
+argument to the method, we do not need to import it into this file.  This means
+that this file has no import dependence, direct or indirect, on bpy.  We then
+code our addon logic to the interface that the API Wrapper layer provides.
+We use it to get the active object, then update the location on that object.
+
+Hooking in the logic
+--------------------
+
+Finally, we need to add the addon logic to the operator.  To do this, we first
+need to add the Object API Wrapper to the root __init__.py file.  Our imports
+section becomes:
+
+<--Code-->
+import traceback
+
+if "bpy" in locals():
+    import importlib
+    importlib.reload(object_api_wrapper)
+    importlib.reload(move_object_operator)
+    importlib.reload(test_operators)
+else:
+    from .api_wrapper import object_api_wrapper
+    from .operators import move_object_operator, test_operators
+
+import bpy
+<--/Code-->
+
+You'll notice the additional statements to load/reload the api_wrapper module.
+Then, add the following to the register() function:
+
+<--Code-->
+bpy.types.Scene.object_api_wrapper = object_api_wrapper.ObjectApiWrapper()
+<--/Code-->
+
+Finally, add the following to the unregister() function:
+
+<--Code-->
+del bpy.types.Scene.object_api_wrapper
+<--/Code-->
+
+These lines will instantiate an Object API Wrapper object, and store it in
+the Blender Scene, upon addon registration.  This ensures that we have the
+wrapper available to pass to our addon_logic methods.
+
+Tests
+=====
+
+Each layer of our architecture gets it's own set of tests, so we'll start at
+the lowest level and work our way up.  This means we'll begin with the tests for
+the API Wrapper layer.
+
+API Wrapper Tests
+-----------------
+
+Our API Wrapper tests will be performed inside our test operator.  Open the
+test_operators.py file in the operators/ module and add the following two
+methods before the operator class definition:
+
+<--Code-->
+def clear_viewport():
+    bpy.ops.object.select_all(action='SELECT')
+    bpy.ops.object.delete()
+
+def test_api_wrapper(context):
+    # Create a cube as the selected, active object
+    bpy.ops.mesh.primitive_cube_add(size=2, view_align=False, enter_editmode=False, location=(2, 2, 2))
+
+    # Validate that the active object (the cube) is where we expect it to be
+    active_obj = context.scene.object_api_wrapper.get_active_object()
+    assert(active_obj.get_location_x() - 2.0 < 0.01)
+<--/Code-->
+
+The clear_viewport() method simply deletes all objects in the viewport by calling
+other Blender operators directly.  The test_api_wrapper() method first creates
+a Cube at a particular location using another existing operator, then uses the
+Object API Wrapper to get the active object.  We then make sure they are the same
+by comparing the location of the active object to the location of the cube.
+
+Finally, update the execute() method of the test Operator to call the new methods
+we just defined:
+
+<--Code-->
+class OBJECT_OT_MoveObjectTests(bpy.types.Operator):
+    bl_idname = "object.another_move_object_test"
+    bl_label = "Test the Move Object Addon!"
+    bl_options = {'REGISTER'}
+
+    def execute(self, context):
+        # Clear the viewport to remove excess objects
+        clear_viewport()
+
+        # Unit test api wrapper
+        test_api_wrapper(context)
+
+        # Display a message in the UI letting the user know that tests have passed
+        self.report({'INFO'}, "Tests Passed")
+
+        # Let's blender know the operator is finished
+        return {'FINISHED'}
+<--/Code-->
+
+Addon Logic Testing
+-------------------
+
+Testing the addon logic will require some additional effort, but it will be
+worth it as we will be able to put these tests onto CI to be run automatically.
+Before we can get into writing tests though, we need to talk a bit about Mocks.
+
+Mocking
+~~~~~~~
+
+Mocking in Software Testing is a relatively common practice, and basically means
+using 'fake' classes instead of real ones during testing.  This has a large number
+of practical benefits, including:
+
+* Allows unit testing specific parts of the system without relying on complex dependencies
+* Simulates network connections to keep unit tests fast
+* Promotes Modular code and Test-Driven Development
+* Allows multiple developers to work on different parts of the system simultaneously
+
+In our case, mocking is what allows us to have automated tests *at all*.  We're
+going to use Mocks in place of the API Wrapper layer, completely removing the
+need to import bpy in order to test our addon logic.
+
+For those who want to learn more about the practice of mocking, I've included
+several links at the end of the article which I would encourage you to read.
+
+Writing a Mock Object
+~~~~~~~~~~~~~~~~~~~~~
+
+The Mock Objects we create in this tutorial will be a bit strange.  If we didn't
+need to tip-toe around the bpy module so carefully, we could reduce our Mock code
+to basically nothing.  However, the extra work is worth getting to have our
+tests run automatically.  So, create a new file in the addon_logic/api_wrapper_mock/
+folder, called object_api_mock.py:
+
+<--Code-->
+from unittest.mock import MagicMock
+
+class Object3dMock(object):
+    def __init__(self, location):
+        self.location = location
+
+    def get_location_x(self):
+        return self.location[0]
+
+    def set_location_x(self, new_loc):
+        self.location[0] = new_loc
+
+    def get_location_y(self):
+        return self.location[1]
+
+    def set_location_y(self, new_loc):
+        self.location[1] = new_loc
+
+    def get_location_z(self):
+        return self.location[2]
+
+    def set_location_z(self, new_loc):
+        self.location[2] = new_loc
+
+class ObjectApiMock(object):
+    get_active_object = MagicMock()
+<--/Code-->
+
+Let's walk through everything going on in this code.
+
+First, we import the MagicMock object from the unittest module.  This will make
+our job of building mock objects much easier.
+
+Then, we define an Object3dMock class.  You'll notice that this class shares
+exactly the same methods as the Object3dWrapper in the object_api_wrapper.py file.
+This is a requirement, as this Object3dMock is going to get returned to your
+addon logic in place of the Object3dWrapper, and will call all the same methods.
+
+Finally, we define our ObjectApiMock.  This has a single attribute, with the
+same name as the method we defined in our ObjectApiWrapper class.  However,
+instead of being a method, this is defined as a MagicMock() object.  This lets
+us call the method, as well as define return values for the method and assert
+that the method was called.
+
+Unit Tests
+----------
+
+Now that we've defined our Mocks, we can write our actual unit tests.  Create a
+new file in the addon_logic/test/ folder called move_object_test.py:
+
+<--Code-->
+import unittest
+
+from move_object import move_active_object
+from api_wrapper_mock.object_api_mock import ObjectApiMock, Object3dMock
+
+class TestMoveActiveObject(unittest.TestCase):
+    def test_move_object(self):
+        object_api_wrapper = ObjectApiMock()
+        active_object = Object3dMock([1.0, 2.0, 3.0])
+        object_api_wrapper.get_active_object.return_value = active_object
+
+        move_active_object(object_api_wrapper, 1.0, 1.0, 1.0)
+
+        assert(active_object.get_location_x() - 2.0 < 0.01)
+        assert(active_object.get_location_y() - 3.0 < 0.01)
+        assert(active_object.get_location_z() - 4.0 < 0.01)
+        object_api_wrapper.get_active_object.assert_called()
+
+if __name__ == '__main__':
+    unittest.main()
+<--/Code-->
+
+Here, we start by importing the unittest module, then our addon logic and mock
+API wrapper.
+
+Then, we define a new test using standard unittest terminology, by subclassing
+from unittest.TestCase.  The name of the class and test method is important as
+well, we need to include the word 'test' in both.
+
+Within the test_move_object() method, we start by defining our mock return value.
+In this case, that means:
+
+1. Creating an instance of the mock wrapper
+2. Creating an instance of the mock object we want to return from the get_active_object() method
+3. Registering that object as the return value of the method
+
+Now, we can pass our mock API wrapper to the move_active_object() method, in place
+of the real one.  Afterwards, we use assert statements to validate that the mock
+object has been updated correctly, and that the expected methods were called
+from the mock API.
+
+You can now run this test with the following command from the addon_logic module:
+
+<--Code-->
+python -m test.move_object_test
+<--/Code-->
+
+Integration Tests
+-----------------
+
+Finally, we'll return to the test_operators.py file in the operators/ module,
+and add some integration tests to run the addon logic using the real API.  Add
+another method above the class definition:
+
+<--Code-->
+def test_move_operator(context):
+    # Create a cube as the selected, active object
+    bpy.ops.mesh.primitive_cube_add(size=2, view_align=False, enter_editmode=False, location=(2, 2, 2))
+
+    # Test the overall flow
+    move_active_object(bpy.context.scene.object_api_wrapper, 1.0, 1.0, 1.0)
+    for o in bpy.context.scene.objects:
+        assert(o.location.x - 1.0 < 0.01)
+<--/Code-->
+
+In this method, we first create a cube as the active object in Blender, then
+call our move_active_object() method, passing in the real API Wrapper we've
+registered with the Blender Scene.  Finally, we assert that the object has
+moved to the correct location.
+
+Now, we just need to add this to the execute method.  Our final test operator
+should look like this:
+
+<--Code-->
+class OBJECT_OT_MoveObjectTests(bpy.types.Operator):
+    bl_idname = "object.another_move_object_test"
+    bl_label = "Test the Move Object Addon!"
+    bl_options = {'REGISTER'}
+
+    def execute(self, context):
+        # Clear the viewport to remove excess objects
+        clear_viewport()
+
+        # Unit test api wrapper
+        test_api_wrapper(context)
+
+        # Clear the viewport inbetween tests
+        clear_viewport()
+
+        # Test the overall flow
+        test_move_operator(context)
+
+        # Display a message in the UI letting the user know that tests have passed
+        self.report({'INFO'}, "Tests Passed")
+
+        # Let's blender know the operator is finished
+        return {'FINISHED'}
+<--/Code-->
+
+Using the Addon
+===============
+
+Now that we've completed our coding, we're going to want to actually use the addon.
+You can create a zip file out of the whole repository, which can then be imported
+directly into Blender from the User Preferences menu.  We did not add the
+operators to any section of the UI, so you'll need to call them from the search
+menu (in v2.80, this has changed from spacebar to f3).  You'll find them as
+'Test the Move Object Addon!' and 'Move Active Object'.
+
+CI
+==
+
+Setting up Continuous Integration allows us to automatically run our unit tests
+against the addon logic any time we commit a change into git.  We are going to
+use Travis CI, but a similar procedure will work for any other CI provider, you'll
+just have to adapt the configuration file.
+
+First, go to https://github.com/, and register for an account, if you haven't
+already.  You'll need to create a new repository for your project.  If you've
+never done this before, this is a great guide (https://guides.github.com/activities/hello-world/)
+
+Second, go to https://travis-ci.org and sign up for an account with github.
+Under your profile Settings (Click on your avatar in the top-right corner, then
+hit 'Settings'), and you should see a list of your repositories.  If you don't,
+hit the button to refresh the list.  Where you see your new repository for this
+project, hit the switch to the right to enable it.  From this point on, Travis
+will monitor that repository in github for any changes, which will trigger a
+build.
+
+Finally, we have to provide a configuration file so that Travis knows how to
+run your tests during a build.  Create a new file called .travis.yml in the main
+folder of your project:
+
+<--Code-->
+dist: xenial
+language: python
+python:
+- 3.7
+script:
+- cd $TRAVIS_BUILD_DIR/addon_logic && python -m test.move_object_test
+<--/Code-->
+
+The first three commands (dist, language, and python) are all needed to ensure
+that we have a Python3.7 build environment, which is the same version as the
+version of Python embedded with Blender 2.80.  It is recommended that you always
+keep this set to use the same version of Python which is embedded with the version
+of Blender you are coding for.
+
+The final command (script), tells Travis how to run your test.  If you had multiple
+unit tests in your addon_logic/ module, then you would have one line per test file
+in the Travis configuration file.
+
+Now, push this code to github and, within a few minutes, you should see your
+first build trigger in Travis CI.  If it succeeds, once it finishes it should
+show up as green.
+
+Conclusion
+==========
+
+Ultimately, this layered architecture does create some additional work, and is
+not completely intuitive.  However, I believe that the pros outweigh the cons.
+We get to enable true CI on Blender addons for the first time, ease the burden
+of Blender version upgrades with tests designed to catch issues with them, and
+have a well defined structure for moving your logic to other 3D programs by
+defining various API Wrappers for Blender, Maya, 3DS Max, etc.  Most of all, though,
+we get to write testable code.  Anyone who's had to maintain an addon long-term
+will tell you that testable code saves time in the long run, and things like CI
+only increase that gain exponentially.
+
+Until now, most Blender addons have been largely untestable, and all untestable
+code will eventually become bad code.  Maybe we can change that.
+
+References
+==========
+
+https://en.wikipedia.org/wiki/Mock_object#Use_in_test-driven_development
+https://www.telerik.com/products/mocking/unit-testing.aspx
